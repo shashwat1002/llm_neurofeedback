@@ -22,8 +22,8 @@ if __name__ == "__main__":
     set_mpl()
     fig_format = "svg"
     dataset_name, label_name = "commonsense", "labels"
-    model_s = "llama3.1_8b"  # model generate score: "llama3.1_8b" or "qwen2.5_7b" or "llama3.1_70b" or "qwen2.5_72b"
-    model_e = "llama3.1_8b"  # model run prediction exp: "llama3.1_8b" or "qwen2.5_7b" or "llama3.1_70b" or "qwen2.5_72b"
+    model_s = "llama3.1_70b"  # model generate score: "llama3.1_8b" or "qwen2.5_7b" or "llama3.1_70b" or "qwen2.5_72b"
+    model_e = "llama3.1_70b"  # model run prediction exp: "llama3.1_8b" or "qwen2.5_7b" or "llama3.1_70b" or "qwen2.5_72b"
     randomized = True
 
     cfg_s = load_exp_cfg(model_s)
@@ -44,7 +44,7 @@ if __name__ == "__main__":
     os.makedirs(fig_dir, exist_ok=True)
     n_train_examples = cfg_s.n_train_examples
     cmap = plt.get_cmap("viridis")
-    n_exp = 100
+    n_exp = 50
     n_sample = 500
     n_layers = SELECTED_LAYERS[model_s][-1] + 1
 
@@ -78,7 +78,19 @@ if __name__ == "__main__":
     )
     # breakpoint()
 
-    plot_prediction_performance_acc_only(
+    # plot_prediction_performance_acc_only(
+    #     acc,
+    #     acc_rand,
+    #     pcs,
+    #     fig_dir,
+    #     colors,
+    #     colors2,
+    #     fig_format=fig_format,
+    #     dataset_labels=("Original", "Randomized"),
+    #     n_sample=n_sample,
+    # )
+
+    plot_prediction_performance_acc_only_sparse(
         acc,
         acc_rand,
         pcs,
@@ -86,7 +98,7 @@ if __name__ == "__main__":
         colors,
         colors2,
         fig_format=fig_format,
-        dataset_labels=("Original", "Randomized"),
+        rate=50,
+        dataset_labels=("Original", "Relabeled"),
         n_sample=n_sample,
     )
-    # plot_layers_prediction_performance(acc, pcs, fig_dir, colors, n_sample=n_sample)
