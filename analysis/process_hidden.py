@@ -49,7 +49,7 @@ def extract_last_representations(hidden, batch_tokens, assistant_tag, eos_tag, m
 
 
 @torch.inference_mode()
-def get_hiddens(model, tokenizer, data: Union[List[str], str], batch_size=20, method='mean'):
+def get_hiddens(model, tokenizer, data: Union[List[str], str], batch_size=20, method='mean', return_logits=False):
     """Extract hidden states from model for given data
     method determines how to extract the hidden states:
         'mean': average over all tokens from last assistant tag to the first eos tag after that
@@ -74,13 +74,14 @@ def get_hiddens(model, tokenizer, data: Union[List[str], str], batch_size=20, me
     for i in trange(0, len(data), batch_size, desc="Extracting hiddens"):
         batch_tokens = {key: value[i:i + batch_size] for key, value in tokens.items()}
         outputs = model(**batch_tokens, output_hidden_states=True)
-        logits.append(outputs.logits.detach().cpu())
+        if return_logits:
+            logits.append(outputs.logits.detach().cpu())
         batch_hiddens = torch.stack([outputs.hidden_states[j+1] for j in range(n_layers)], dim=0)  # (n_layers, batch_size, seq_len, hidden_size)
         batch_hiddens = extract_last_representations(batch_hiddens, batch_tokens, assistant_tag, eos_tag, method)
         hiddens.append(batch_hiddens.detach().cpu())
 
     hiddens = torch.cat(hiddens, dim=1)  # (n_layers, total_batch_size, hidden_size)
-    logits = torch.cat(logits, dim=0)
+    logits = torch.cat(logits, dim=0) if return_logits else None
     return logits, hiddens
 
 

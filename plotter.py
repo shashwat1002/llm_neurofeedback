@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+from cycler import cycler
 
 
 PLOT_PARAMS = {
@@ -7,6 +8,23 @@ PLOT_PARAMS = {
     "bbox_inches": 'tight',
     "pad_inches": 0.1,
 }
+
+# Dark, colorblind-friendly palette (8 colors)
+DARK_COLORS = [
+    '#003f8e',  # dark blue
+    '#9e0000',  # dark red
+    '#005c3b',  # dark green
+    '#7a3800',  # dark orange
+    '#4b006e',  # dark purple
+    '#006670',  # dark teal
+    '#5c4000',  # dark gold/brown
+    '#3d3d3d',  # dark grey
+]
+
+
+def get_pc_colors(n):
+    """Return n dark colors from DARK_COLORS (cycling if n > 8)."""
+    return [DARK_COLORS[i % len(DARK_COLORS)] for i in range(n)]
 
 
 def set_mpl():
@@ -16,6 +34,7 @@ def set_mpl():
     mpl.rcParams['savefig.dpi'] = 600
     mpl.rcParams['axes.spines.right'] = False
     mpl.rcParams['axes.spines.top'] = False
+    mpl.rcParams['axes.prop_cycle'] = cycler(color=DARK_COLORS)
 
 
 def plot_neural_classifier_accuracies(layers, train_accuracies, test_accuracies, axis_name, hidden_method, save_dir, size=3):

@@ -6,13 +6,13 @@ process_hidden_method: "mean"  # "mean", "last"
 clf: "pcascore"  # "pca", "lr"
 pc_number: 3
 normalize: true  # whether to normalize the projection score of axes
-batch_size: 16
+batch_size: 2
 all_pc_exp: [1, 2, 4, 8, 32, 128, 512]
 quantile_transform: true  # whether to apply quantile transform to the brain scores
 
-n_icl_examples_report: 500
+n_icl_examples_report: 5000
 n_icl_examples_control: [2, 4, 8, 16, 32, 64, 100, 150, 200]
 layers: 0  # 0: sample 5 layers from quantile [0, 25, 50, 75, 100]; -1: only the middle layer; >0: specific layer index
 score_scale: 2  # scale of the neurofeedback score
 exp_id_start: 0
-exp_id_end: 100  # exclusive
+exp_id_end: 50  # exclusive

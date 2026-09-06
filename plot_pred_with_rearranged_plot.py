@@ -21,9 +21,9 @@ from plot_pred import (
 if __name__ == "__main__":
     set_mpl()
     fig_format = "svg"
-    dataset_name, label_name = "commonsense", "labels"
-    model_s = "llama3.1_70b"  # model generate score: "llama3.1_8b" or "qwen2.5_7b" or "llama3.1_70b" or "qwen2.5_72b"
-    model_e = "llama3.1_70b"  # model run prediction exp: "llama3.1_8b" or "qwen2.5_7b" or "llama3.1_70b" or "qwen2.5_72b"
+    dataset_name, label_name = "sst2", "labels"
+    model_s = "qwen2.5_7b_1m"  # model generate score: "llama3.1_8b" or "qwen2.5_7b" or "llama3.1_70b" or "qwen2.5_72b"
+    model_e = "qwen2.5_7b_1m"  # model run prediction exp: "llama3.1_8b" or "qwen2.5_7b" or "llama3.1_70b" or "qwen2.5_72b"
     randomized = True
 
     cfg_s = load_exp_cfg(model_s)
@@ -44,8 +44,8 @@ if __name__ == "__main__":
     os.makedirs(fig_dir, exist_ok=True)
     n_train_examples = cfg_s.n_train_examples
     cmap = plt.get_cmap("viridis")
-    n_exp = 50
-    n_sample = 500
+    n_exp = 30
+    n_sample = 5000
     n_layers = SELECTED_LAYERS[model_s][-1] + 1
 
     pcs = []
@@ -98,7 +98,7 @@ if __name__ == "__main__":
         colors,
         colors2,
         fig_format=fig_format,
-        rate=50,
+        rate=500,
         dataset_labels=("Original", "Relabeled"),
         n_sample=n_sample,
     )

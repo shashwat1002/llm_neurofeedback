@@ -26,6 +26,8 @@ MODEL_ALIASES = {
     'qwen2.5_7b': 'Qwen/Qwen2.5-7B-Instruct',
     'qwen2.5_1.5b': 'Qwen/Qwen2.5-1.5B-Instruct',
     'qwen2.5_3b': 'Qwen/Qwen2.5-3B-Instruct',
+    'qwen2.5_7b_1m': 'Qwen/Qwen2.5-7B-Instruct-1M',
+    'qwen2.5_14b_1m': 'Qwen/Qwen2.5-14B-Instruct-1M',
 }
 
 LARGE_MODEL_ALIASES = {'llama3.1_70b', 'llama3_70b', 'qwen2.5_72b'}
@@ -52,12 +54,12 @@ def load_yaml(file_path: Union[Path, str]) -> Dict:
     return yaml_dict
 
 
-def load_exp_cfg(model_name: str, pc_number: int = 3, clf='default'):
+def load_exp_cfg(model_name: str, pc_number: int = 3, clf='default', randomize=False):
     ROOT = Path(__file__).resolve().parents[0]
     cfg = load_yaml(ROOT / "configs" / "nf_exp1.yml")
 
     cfg['model_name'] = MODEL_ALIASES.get(model_name, model_name)
-
+    cfg['randomize'] = randomize
     if clf == 'default':
         clf = cfg['clf']
     else:
@@ -94,6 +96,75 @@ def load_lm(model_name_or_path, device=None):
     os.makedirs(cache_dir, exist_ok=True)
     model = AutoModelForCausalLM.from_pretrained(model_name_or_path, torch_dtype=dtype, device_map="auto", cache_dir=cache_dir)
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, padding_side=padding_side, pad_to_multiple_of=8)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = padding_side
+
+    print('Padding side is set to', tokenizer.padding_side)
+    torch.set_grad_enabled(False)
+    seed_everything(42)
+    return model, tokenizer
+
+
+def load_lm_tp_parallel(model_name_or_path, quantize=False):
+    """Load a model for multi-GPU inference.
+
+    Without --quantize: tensor parallelism via tp_plan="auto". Each rank holds a
+    shard of every weight; forward passes run in parallel across all ranks with an
+    all-reduce per layer. Requires torchrun and an initialised process group.
+
+    With --quantize: pipeline parallelism via device_map="auto" with 4-bit
+    bitsandbytes quantization. Layers are distributed across GPUs sequentially.
+    Run with plain python (single process); no torchrun needed.
+    """
+    import torch.distributed as dist
+
+    cfg_path = Path(__file__).resolve().parent / "configs" / "nf_exp1.yml"
+    cfg = load_yaml(cfg_path)
+    padding_side = cfg.get("padding_side", "left")
+    dtype = cfg.get("dtype", "float16")
+    if platform.system() == 'Linux' and 'gatech' in platform.node():
+        cache_dir = f'{cfg["cache_dir"]}/downloaded_models'
+    else:
+        cache_dir = './downloaded_models'
+    os.makedirs(cache_dir, exist_ok=True)
+
+    if quantize:
+        from transformers import BitsAndBytesConfig
+        n_gpus = torch.cuda.device_count()
+        mem_per_gpu = f"{int(torch.cuda.get_device_properties(0).total_memory * 0.9 / 1024**3)}GiB"
+        max_memory = {i: mem_per_gpu for i in range(n_gpus)}
+        quantization_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=torch.float16)
+        print(f"Loading model (pipeline parallel, 4-bit quantized) across {n_gpus} GPUs ({mem_per_gpu} each):", model_name_or_path)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name_or_path,
+            device_map="auto",
+            max_memory=max_memory,
+            quantization_config=quantization_config,
+            attn_implementation="flash_attention_2",
+            cache_dir=cache_dir,
+        )
+    else:
+        if not dist.is_initialized():
+            raise RuntimeError(
+                "torch.distributed must be initialised before load_lm_tp_parallel. "
+                "Call dist.init_process_group('nccl') and torch.cuda.set_device(local_rank) first."
+            )
+        local_rank = dist.get_rank()
+        torch.cuda.set_device(local_rank)
+        if local_rank == 0:
+            print("Loading model (tensor parallel):", model_name_or_path, 'from:', cache_dir)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name_or_path,
+            tp_plan="auto",
+            torch_dtype=dtype,
+            attn_implementation="flash_attention_2",
+            cache_dir=cache_dir,
+        )
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_name_or_path, padding_side=padding_side, pad_to_multiple_of=8
+    )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = padding_side

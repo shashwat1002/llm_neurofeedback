@@ -86,7 +86,7 @@ def honesty_function_dataset(data_path, tags, shuffle=False, n_train=512, includ
     return dataset
 
 
-def happy_sad_dataset(data_path, shuffle=True, train_ratio=0.8):
+def happy_sad_dataset(data_path, shuffle=True, train_ratio=0.8, randomize_labels=False, seed=42):
     happiness_path = os.path.join(data_path, "happiness.json")
     sadness_path = os.path.join(data_path, "sadness.json")
     with open(happiness_path, 'r', encoding="utf-8") as f:
@@ -106,11 +106,15 @@ def happy_sad_dataset(data_path, shuffle=True, train_ratio=0.8):
 
     if shuffle:
         random.shuffle(examples)
+    
+    if randomize_labels:
+        random.seed(seed)
+        examples = [(ex[0], random.randint(0, 1)) for ex in examples] # replace with random labels
 
     return _split_examples(examples, train_ratio)
 
 
-def load_commonsense(data_path, shuffle=False, train_ratio=0.75, n_sample=2000):
+def load_commonsense(data_path, shuffle=False, train_ratio=0.75, n_sample=2000, randomize_labels=False, seed=42):
     assert shuffle == False, "Shuffling is not supported for commonsense dataset."
     df_train = pd.read_csv(data_path + '/cm_train.csv')
     df_test = pd.read_csv(data_path + '/cm_test.csv')
@@ -120,6 +124,10 @@ def load_commonsense(data_path, shuffle=False, train_ratio=0.75, n_sample=2000):
     df_all_short = _interleave_balanced(df_all_short)
 
     examples = [(row["input"], row["label"]) for _, row in df_all_short.iterrows()]
+
+    if randomize_labels:
+        random.seed(seed)
+        examples = [(ex[0], random.randint(0, 1)) for ex in examples] # replace with random labels
 
     total_examples = len(examples)
     if n_sample is not None:
@@ -134,7 +142,7 @@ def load_commonsense(data_path, shuffle=False, train_ratio=0.75, n_sample=2000):
     return _split_examples(examples, effective_ratio)
 
 
-def load_true_false(data_path, shuffle=True, train_ratio=0.75, n_sample=2000):
+def load_true_false(data_path, shuffle=True, train_ratio=0.75, n_sample=2000, randomize_labels=False, seed=42):
     df_all = pd.concat([
         pd.read_csv(data_path + '/' + f) for f in [
             'animals_true_false.csv', 'cities_true_false.csv', 'companies_true_false.csv',
@@ -148,6 +156,10 @@ def load_true_false(data_path, shuffle=True, train_ratio=0.75, n_sample=2000):
     df_all = _interleave_balanced(df_all)
 
     examples = [(row["statement"], row["label"]) for _, row in df_all.iterrows()]
+
+    if randomize_labels:
+        random.seed(seed)
+        examples = [(ex[0], random.randint(0, 1)) for ex in examples] # replace with random labels
 
     total_examples = len(examples)
     if n_sample is not None:
@@ -199,6 +211,31 @@ def load_simple_txt(data_path, shuffle=True, train_ratio=0.5, n_sample=1200):
     print(f"Used examples: {used_examples}")
 
     effective_ratio = _compute_effective_ratio(used_examples, used_examples, train_ratio, min_split=1)
+    return _split_examples(examples, effective_ratio)
+
+
+def load_sst2(data_path, shuffle=True, train_ratio=0.75, n_sample=2000, randomize_labels=False, seed=42):
+    df = pd.read_csv(os.path.join(data_path, "sst2.csv"))
+    if shuffle:
+        df = df.sample(frac=1).reset_index(drop=True)
+    df = _interleave_balanced(df, label_col='label')
+
+    examples = [(row["sentence"], row["label"]) for _, row in df.iterrows()]
+
+    if randomize_labels:
+        random.seed(seed)
+        examples = [(ex[0], random.randint(0, 1)) for ex in examples]
+
+    total_examples = len(examples)
+    if n_sample is not None:
+        examples = examples[:n_sample]
+    used_examples = len(examples)
+
+    if total_examples != used_examples:
+        print(f"Total examples available: {total_examples}")
+    print(f"Used examples: {used_examples}")
+
+    effective_ratio = _compute_effective_ratio(n_sample, used_examples, train_ratio)
     return _split_examples(examples, effective_ratio)
 
 
@@ -254,28 +291,29 @@ def emotion(data_path, shuffle=True):
     return data
 
 
-def load_dataset(dataset_name, n_test=600):
+def load_dataset(dataset_name, n_sample=1500, n_test=600, randomize_labels=False, seed=42):
     seed_everything(42)  # for shuffle dataset; keep unchanged
+    train_ratio = 1 - n_test / n_sample
     if dataset_name == "happy_sad":
-        dataset = happy_sad_dataset("data/emotions", shuffle=True, train_ratio=0.6)
+        dataset = happy_sad_dataset("data/emotions", shuffle=True, train_ratio=train_ratio, randomize_labels=randomize_labels, seed=seed)
     elif dataset_name == "commonsense":
-        dataset = load_commonsense('data/ethics_commonsense', shuffle=False, train_ratio=0.6, n_sample=1500)
+        dataset = load_commonsense('data/ethics_commonsense', shuffle=False, train_ratio=train_ratio, n_sample=n_sample, randomize_labels=randomize_labels, seed=seed)
         # do not shuffle commonsense dataset, making a balanced training set
     # elif dataset_name == "honesty":
     #     dataset = honesty_function_dataset("data/facts_true_false.csv", tags=tags, shuffle=False, n_train=512, include_tf='both')
     elif dataset_name == "true_false":
-        dataset = load_true_false('data/true-false-dataset', shuffle=True, train_ratio=0.6, n_sample=1500)
+        dataset = load_true_false('data/true-false-dataset', shuffle=True, train_ratio=train_ratio, n_sample=n_sample, randomize_labels=randomize_labels, seed=seed)
     elif dataset_name == "power_seeking":
-        dataset = load_simple_txt("data/power-seeking.txt", shuffle=True, train_ratio=0.6, n_sample=1500)
+        dataset = load_simple_txt("data/power-seeking.txt", shuffle=True, train_ratio=train_ratio, n_sample=n_sample)
     # elif dataset_name == "sycophancy":
     #     dataset = load_simple_txt('data/sycophancy_dataset.txt', shuffle=True, train_ratio=0.5, n_sample=1200)
     elif dataset_name == "sycophancy":
-        dataset = load_sycophancy_agree('data/sycophancy_agreement.txt', shuffle=True, train_ratio=0.6, n_sample=1500)
+        dataset = load_sycophancy_agree('data/sycophancy_agreement.txt', shuffle=True, train_ratio=train_ratio, n_sample=n_sample)
+    elif dataset_name == "sst2":
+        dataset = load_sst2('data/sst2', shuffle=True, train_ratio=train_ratio, n_sample=n_sample, randomize_labels=randomize_labels, seed=seed)
     else:
-        raise ValueError(f"Unknown dataset {dataset_name}, please choose from happy_sad, commonsense, honesty, true_false, sycophancy, or sycophancy_agree.")
+        raise ValueError(f"Unknown dataset {dataset_name}, please choose from happy_sad, commonsense, true_false, sycophancy, sst2.")
 
-    if len(dataset['test']['sentences']) != n_test:
-        print(f"Warning: The test set size is {len(dataset['test']['sentences'])}, expected {n_test}.")
     return dataset
 
 

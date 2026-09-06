@@ -46,12 +46,12 @@ from probe_hidden import get_sequence_avg_hiddens, infer_model_name
 from utils import load_lm, Binarizer, safe_dump
 
 # ── defaults ──────────────────────────────────────────────────────────────────
-N_POOL           = 500
-N_TOTAL          = 600
-TRAIN_SIZES      = [100, 200, 300, 400]
+N_POOL           = 5200   # number of examples to sample in each outer loop (probe train+test pool)
+N_TOTAL          = 6000
+TRAIN_SIZES      = [500, 1000, 2000]
 DEFAULT_OUTER    = 3
 DEFAULT_INNER    = 5
-DEFAULT_MAX_TEST = 50   # max test examples per ICL run (for tractability)
+DEFAULT_MAX_TEST = 500   # max test examples per ICL run (for tractability)
 
 
 # ── ICL prediction on held-out test examples ──────────────────────────────────
@@ -273,16 +273,45 @@ def probe_icl_experiment(
                         print(f"    [skip – single class in train] {split_id}")
                         continue
 
-                    # ── probe ─────────────────────────────────────────────────
+                    # ── probe (two independent seeds for control) ─────────────
                     scaler  = StandardScaler()
                     X_train = scaler.fit_transform(pool_hiddens[train_idx])
                     X_test  = scaler.transform(pool_hiddens[test_mask])
 
-                    clf = SGDClassifier(max_iter=2000, n_jobs=1)
+                    # clf  = SGDClassifier(max_iter=5000, n_jobs=1, random_state=0)
+                    # clf2 = SGDClassifier(max_iter=5000, n_jobs=1, random_state=1)
+
+                    clf = SGDClassifier(
+                            loss="log_loss",       # or "hinge" for linear SVM
+                            penalty="l2",
+                            alpha=1e-4,
+                            learning_rate="optimal",
+                            max_iter=10000,
+                            tol=1e-7,
+                            early_stopping=True,
+                            n_iter_no_change=5,
+                            random_state=42,
+                        )
+                    clf2 = SGDClassifier(
+                            loss="log_loss",       # or "hinge" for linear SVM
+                            penalty="l2",
+                            alpha=1e-4,
+                            learning_rate="optimal",
+                            max_iter=10000,
+                            tol=1e-7,
+                            early_stopping=True,
+                            n_iter_no_change=5,
+                            random_state=91,
+                        )
                     clf.fit(X_train, y_train)
-                    probe_preds = clf.predict(X_test)
+                    clf2.fit(X_train, y_train)
+                    probe_preds  = clf.predict(X_test)
+                    probe_preds2 = clf2.predict(X_test)
                     probe_report = classification_report(
                         y_test, probe_preds, output_dict=True, zero_division=0
+                    )
+                    probe_report2 = classification_report(
+                        y_test, probe_preds2, output_dict=True, zero_division=0
                     )
 
                     # ── ICL prediction ─────────────────────────────────────────
@@ -318,15 +347,20 @@ def probe_icl_experiment(
                         y_test_icl, icl_preds, output_dict=True, zero_division=0
                     )
 
-                    # Agreement: compare probe and ICL on the same test subset
-                    probe_preds_icl = clf.predict(
-                        scaler.transform(pool_hiddens[test_indices_pool])
-                    )
-                    try:
-                        agreement = float(cohen_kappa_score(probe_preds_icl, icl_preds))
-                    except ValueError:
-                        # cohen_kappa undefined when one rater uses only one class
-                        agreement = float("nan")
+                    # Agreement: compare probes and ICL on the same test subset
+                    X_icl_test = scaler.transform(pool_hiddens[test_indices_pool])
+                    probe_preds_icl  = clf.predict(X_icl_test)
+                    probe_preds2_icl = clf2.predict(X_icl_test)
+
+                    def _kappa(a, b):
+                        try:
+                            return float(cohen_kappa_score(a, b))
+                        except ValueError:
+                            return float("nan")
+
+                    agreement        = _kappa(probe_preds_icl,  icl_preds)       # probe1 vs ICL
+                    agreement2       = _kappa(probe_preds2_icl, icl_preds)       # probe2 vs ICL
+                    control_kappa    = _kappa(probe_preds_icl,  probe_preds2_icl) # probe1 vs probe2 (control)
                         
 
                     rec = {
@@ -341,36 +375,76 @@ def probe_icl_experiment(
                         "icl_test_idx":  pool_idx[test_indices_pool].tolist(),
                         # predictions & reports
                         "probe_preds":   probe_preds.tolist(),
+                        "probe_preds2":  probe_preds2.tolist(),
                         "icl_preds":     icl_preds,
                         "true_labels_probe": y_test.tolist(),
                         "true_labels_icl":   y_test_icl.tolist(),
+                        # aligned ICL-subset arrays (same length, same order)
+                        "test_sentences_icl":  test_sents_icl,
+                        "probe_preds_icl":     probe_preds_icl.tolist(),
+                        "probe_preds2_icl":    probe_preds2_icl.tolist(),
                         "probe_report":  probe_report,
+                        "probe_report2": probe_report2,
                         "model_report":  model_report,
-                        "kappa":         agreement,
+                        # agreement measures
+                        "kappa":         agreement,       # probe1 vs ICL
+                        "kappa2":        agreement2,      # probe2 vs ICL
+                        "kappa_control": control_kappa,   # probe1 vs probe2 (control)
                     }
                     safe_dump(rec, split_cache)
                     records.append(rec)
 
                     print(
                         f"    probe_acc={probe_report['accuracy']:.3f}  "
+                        f"probe2_acc={probe_report2['accuracy']:.3f}  "
                         f"icl_acc={model_report['accuracy']:.3f}  "
-                        f"kappa={agreement:.3f}"
+                        f"kappa={agreement:.3f}  "
+                        f"kappa2={agreement2:.3f}  "
+                        f"kappa_control={control_kappa:.3f}"
                     )
 
     # 7. Aggregate and save ────────────────────────────────────────────────────
     agg_path = pkl_path.parent / f"probe_icl_results_hiddenlayer{hidden_layer}.pkl"
-    safe_dump(records, agg_path)
+    output = {
+        "records": records,
+        "params": {
+            "pkl_path":       str(pkl_path),
+            "model_name":     model_name,
+            "hidden_layer":   hidden_layer,
+            "label_layers":   label_layers,
+            "n_total":        n_total,
+            "n_pool":         N_POOL,
+            "train_sizes":    TRAIN_SIZES,
+            "n_outer":        n_outer,
+            "n_inner":        n_inner,
+            "max_icl_test":   max_icl_test,
+            "scenario":       scenario,
+            "probe_clf": {
+                "loss":             "log_loss",
+                "penalty":          "l2",
+                "alpha":            1e-4,
+                "learning_rate":    "optimal",
+                "max_iter":         10000,
+                "tol":              1e-7,
+                "early_stopping":   True,
+                "n_iter_no_change": 5,
+            },
+        },
+    }
+    safe_dump(output, agg_path)
     print(f"\nSaved {len(records)} split records to {agg_path}")
 
     # 8. Summary table ─────────────────────────────────────────────────────────
     if records:
         df_rec = pd.DataFrame([
             {
-                "label_layer": r["label_layer"],
-                "train_size":  r["train_size"],
-                "probe_acc":   r["probe_report"]["accuracy"],
-                "icl_acc":     r["model_report"]["accuracy"],
-                "kappa":       r["kappa"],
+                "label_layer":   r["label_layer"],
+                "train_size":    r["train_size"],
+                "probe_acc":     r["probe_report"]["accuracy"],
+                "icl_acc":       r["model_report"]["accuracy"],
+                "kappa":         r["kappa"],
+                "kappa2":        r.get("kappa2",        float("nan")),
+                "kappa_control": r.get("kappa_control", float("nan")),
             }
             for r in records
         ])
@@ -378,7 +452,9 @@ def probe_icl_experiment(
         col_w = 20
         print(
             f"  {'layer':>5}  {'N':>5}  "
-            f"{'probe_acc':>{col_w}}  {'icl_acc':>{col_w}}  {'kappa':>{col_w}}"
+            f"{'probe_acc':>{col_w}}  {'icl_acc':>{col_w}}  "
+            f"{'kappa(p1,icl)':>{col_w}}  {'kappa(p2,icl)':>{col_w}}  "
+            f"{'kappa(p1,p2) ctrl':>{col_w}}"
         )
         for (ll, ts), grp in df_rec.groupby(["label_layer", "train_size"]):
             def fmt(col):
@@ -387,7 +463,9 @@ def probe_icl_experiment(
                 f"  {ll:>5}  {ts:>5}  "
                 f"{fmt('probe_acc'):>{col_w}}  "
                 f"{fmt('icl_acc'):>{col_w}}  "
-                f"{fmt('kappa'):>{col_w}}"
+                f"{fmt('kappa'):>{col_w}}  "
+                f"{fmt('kappa2'):>{col_w}}  "
+                f"{fmt('kappa_control'):>{col_w}}"
             )
 
     return records

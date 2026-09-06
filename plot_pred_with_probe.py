@@ -170,13 +170,14 @@ def plot_prediction_performance_with_probe(
         )
     )
 
-    plt.tight_layout(rect=(0, 0, 0.85, 1))
+    plt.tight_layout(rect=(0, 0, 1, 0.78))
     fig.legend(
         handles=legend_elements,
-        loc="center left",
-        bbox_to_anchor=(0.82, 0.5),
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.0),
         bbox_transform=fig.transFigure,
-        fontsize=7,
+        fontsize=8,
+        ncol=2,
     )
     plt.savefig(f"{save_dir}/perf_with_probe.{fig_format}", **PLOT_PARAMS)
     plt.close()
@@ -268,8 +269,8 @@ def plot_matched_probe_acc(
     ax.set_ylim(0.4, 1)
     ax.set_xlabel("# Examples")
 
-    if model_name is not None:
-        ax.set_title(model_name.split("/")[-1], fontsize=8)
+    # if model_name is not None:
+    #     ax.set_title(model_name.split("/")[-1], fontsize=8)
 
     legend_elements = []
     for i, pc_number in enumerate(pcs):
@@ -285,7 +286,7 @@ def plot_matched_probe_acc(
                 color=color,
                 lw=0,
                 markersize=4,
-                label=f"PC{pc_number} ICL",
+                label=f"Model Prediction PC{pc_number}",
                 markeredgecolor="black",
                 markeredgewidth=0.7,
             )
@@ -298,7 +299,7 @@ def plot_matched_probe_acc(
                 color=probe_color,
                 lw=0,
                 markersize=4,
-                label=f"PC{pc_number} probe",
+                label=f"Layer-0 probe prediction for PC{pc_number}",
                 markeredgecolor="black",
                 markeredgewidth=0.7,
             )
@@ -309,13 +310,14 @@ def plot_matched_probe_acc(
         )
     )
 
-    plt.tight_layout(rect=(0, 0, 0.85, 1))
+    plt.tight_layout(rect=(0, 0, 1, 0.78))
     fig.legend(
         handles=legend_elements,
-        loc="center left",
-        bbox_to_anchor=(0.82, 0.5),
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.0),
         bbox_transform=fig.transFigure,
-        fontsize=7,
+        fontsize=8,
+        ncol=2,
     )
     plt.savefig(f"{save_dir}/matched_probe_acc.{fig_format}", **PLOT_PARAMS)
     plt.close()
@@ -325,8 +327,8 @@ if __name__ == "__main__":
     set_mpl()
     fig_format = "svg"
     dataset_name = "commonsense"
-    model_s = "llama3.1_70b"
-    model_e = "llama3.1_70b"
+    model_s = "llama3.1_8b"
+    model_e = "llama3.1_8b"
     randomized = False
 
     cfg_s = load_exp_cfg(model_s)
@@ -347,7 +349,7 @@ if __name__ == "__main__":
 
     os.makedirs(fig_dir, exist_ok=True)
 
-    n_exp = 50
+    n_exp = 100
     n_sample = 500
     n_layers = SELECTED_LAYERS[model_s][-1] + 1
 

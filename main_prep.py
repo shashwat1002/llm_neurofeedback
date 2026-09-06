@@ -36,7 +36,7 @@ def apply_chat_template_to_dataset(dataset, tokenizer):
     return dataset
 
 
-def save_ICL_inputs(model, tokenizer, dataset, cfg, save_dir):
+def save_ICL_inputs(model, tokenizer, dataset, cfg, save_dir, randomize=False):
     data_dict = {"train": {}, "test": {}}
     for partition in ['train', 'test']:
         assert len(dataset[partition]['full_prompt']) > 0,'No data found under full_prompt key.'
@@ -44,12 +44,20 @@ def save_ICL_inputs(model, tokenizer, dataset, cfg, save_dir):
                                       cfg.batch_size, cfg.process_hidden_method)
         data_dict[partition]["X"] = hiddens
         data_dict[partition]["y"] = dataset[partition]['labels']
-    safe_dump(data_dict, save_dir / f"hidden_{cfg.process_hidden_method}_data_Xy.pkl")
+    if not randomize:
+        safe_dump(data_dict, save_dir / f"hidden_{cfg.process_hidden_method}_data_Xy.pkl")
+    else:
+        safe_dump(data_dict, save_dir / f"hidden_{cfg.process_hidden_method}_data_Xy_randomized.pkl")
     print("Data prepared and saved.")
 
 
-def train_classifier(cfg, save_dir, file_name, eval_lr_clf=False):
-    data_dict = load(save_dir / f"hidden_{cfg.process_hidden_method}_data_Xy.pkl")
+def train_classifier(cfg, save_dir, file_name, eval_lr_clf=False, randomize=False):
+    if not randomize:
+        data_dict = load(save_dir / f"hidden_{cfg.process_hidden_method}_data_Xy.pkl")
+    else:
+        data_dict = load(save_dir / f"hidden_{cfg.process_hidden_method}_data_Xy_randomized.pkl")
+        file_name += "_randomized"
+    print("filename", file_name)
     all_classifiers, all_train_accuracies = train_classify_hiddens(
         data_dict['train']["X"], data_dict['train']["y"], cfg.clf, cfg.normalize, cfg.pc_number)
 
@@ -73,9 +81,11 @@ def train_classifier(cfg, save_dir, file_name, eval_lr_clf=False):
         plot_neuro_scores_distribution(list(all_classifiers.keys()), all_test_scores, save_file)
 
 
-def generate_ICL_example_scores(dataset, model, tokenizer, cfg, save_dir, file_name, seed=42):
+def generate_ICL_example_scores(dataset, model, tokenizer, cfg, save_dir, file_name, seed=42, randomize=False):
     """Generate baseline (one sentence) neurofeedback scores (given the axis) for all examples in ICL exp."""
     seed_everything(seed)
+    if randomize:
+        file_name += "_randomized"
     if 'pcascore' in file_name:
         # since all pcascore classifiers are the same, only train once
         all_classifiers = load(save_dir / f"hidden_{cfg.process_hidden_method}_classifiers_pcascore_pc1.pkl")
@@ -95,6 +105,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="prepare scores")
     parser.add_argument("--model", type=str, default="llama3_3b")
     parser.add_argument("--dataset", type=str, default="commonsense")  # commonsense, true_false, sycophancy
+    parser.add_argument("--randomize", action='store_true', help="whether to randomize the labels as a control")
+    parser.add_argument("--n_sample", type=int, default=1500, help="total number of samples to load") # 7000
+    parser.add_argument("--n_test", type=int, default=600, help="number of test samples (remainder goes to train)") # 6000
+
     # python main_prep.py --model llama3.1_8b --dataset commonsense
     args = parser.parse_args()
     cfg = load_exp_cfg(args.model)
@@ -102,20 +116,21 @@ if __name__ == "__main__":
     os.makedirs(save_dir, exist_ok=True)
 
     model, tokenizer = load_lm(cfg.model_name)
-    dataset = load_dataset(args.dataset)
+    dataset = load_dataset(args.dataset, n_sample=args.n_sample, n_test=args.n_test, randomize_labels=args.randomize)
     dataset = apply_chat_template_to_dataset(dataset, tokenizer)
-    save_ICL_inputs(model, tokenizer, dataset, cfg, save_dir)
+    save_ICL_inputs(model, tokenizer, dataset, cfg, save_dir, randomize=args.randomize)
 
     cfg.clf = file_name = "lr"
     cfg.pc_number = None
-    train_classifier(cfg, save_dir, file_name, True)
-    generate_ICL_example_scores(dataset, model, tokenizer, cfg, save_dir, file_name)
+    train_classifier(cfg, save_dir, file_name, True, randomize=args.randomize)
+    generate_ICL_example_scores(dataset, model, tokenizer, cfg, save_dir, file_name, randomize=args.randomize)
 
-    cfg.clf = "pcascore"
-    cfg.pc_number = 1
-    file_name = f'{cfg.clf}_pc{cfg.pc_number}'
-    train_classifier(cfg, save_dir, file_name)  # only need to train once for all pcs
-    for pc_number in cfg.all_pc_exp:
-        cfg.pc_number = pc_number
+    if not args.randomize:
+        cfg.clf = "pcascore"
+        cfg.pc_number = 1
         file_name = f'{cfg.clf}_pc{cfg.pc_number}'
-        generate_ICL_example_scores(dataset, model, tokenizer, cfg, save_dir, file_name)
+        train_classifier(cfg, save_dir, file_name)  # only need to train once for all pcs
+        for pc_number in cfg.all_pc_exp:
+            cfg.pc_number = pc_number
+            file_name = f'{cfg.clf}_pc{cfg.pc_number}'
+            generate_ICL_example_scores(dataset, model, tokenizer, cfg, save_dir, file_name)
