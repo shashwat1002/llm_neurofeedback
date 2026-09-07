@@ -40,9 +40,12 @@ if __name__ == "__main__":
     seed_everything(42)
 
     if not args.quantize:
-        local_rank = int(os.environ["LOCAL_RANK"])
-        torch.cuda.set_device(local_rank)
-        dist.init_process_group("nccl", device_id=torch.device(f"cuda:{local_rank}"))
+        if "LOCAL_RANK" not in os.environ:
+            print("Warning: LOCAL_RANK not found in environment variables. Running in single GPU mode.")
+        else:
+            local_rank = int(os.environ["LOCAL_RANK"])
+            torch.cuda.set_device(local_rank)
+            dist.init_process_group("nccl", device_id=torch.device(f"cuda:{local_rank}"))
 
     hiddens_save_dir = Path("results") / cfg.model_name.replace("/", "_") / args.dataset
     if cfg.clf == "lr":
